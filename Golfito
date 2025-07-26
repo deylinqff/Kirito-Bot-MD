@@ -1,0 +1,94 @@
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
+const ytdl = require('ytdl-core');
+const axios = require('axios');
+const fs = require('fs');
+
+async function startBot () {
+  const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+  const sock = makeWASocket({ auth: state });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message || !msg.key.remoteJid) return;
+    const from = msg.key.remoteJid;
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+
+    // 1. Eliminar links de grupo/canal
+    if (text.match(/chat\.whatsapp\.com|t\.me|telegram\.me|instagram\.com\/invite/)){
+      await sock.sendMessage(from, { text: "🚫 No se permiten links de grupo o canal." });
+      // Puedes intentar borrar el mensaje si eres admin
+    }
+
+    // 2. Descargar video de YouTube
+    if (text.startsWith('.yt ')){
+      const url = text.split(' ')[1];
+      if (ytdl.validateURL(url)) {
+        const info = await ytdl.getInfo(url);
+        const format = ytdl.chooseFormat(info.formats, { quality: '18' });
+        const videoBuffer = [];
+        ytdl(url, { format }).on('data', chunk => videoBuffer.push(chunk)).on('end', async () => {
+          const video = Buffer.concat(videoBuffer);
+          await sock.sendMessage(from, { video: video, caption: info.videoDetails.title });
+        });
+      }
+    }
+
+    // 3. Descargar video de TikTok/Instagram
+    if (text.startsWith('.tt ')){
+      const url = text.split(' ')[1];
+      // Usa algún API público, ejemplo: https://ssstik.io/es o algún otro servicio de descarga
+      await sock.sendMessage(from, { text: '⚠️ Esta función requiere integración con APIs externas.' });
+    }
+
+    // 4. Mencionar a todos
+    if (text === '.all'){
+      const groupMetadata = await sock.groupMetadata(from);
+      const mentions = groupMetadata.participants.map(p => p.id);
+      await sock.sendMessage(from, { text: 'Mencionando a todos:', mentions });
+    }
+
+    // 5. Poner link de tu canal
+    if (text === '.canal'){
+      await sock.sendMessage(from, { text: '¡Únete a mi canal! https://t.me/tuCanal' });
+    }
+
+    // 6. Descargar canciones de Play (de YouTube)
+    if (text.startsWith('.play ')){
+      const query = text.replace('.play ', '');
+      // Usa una API o bot externo para buscar y descargar
+      await sock.sendMessage(from, { text: '⚠️ Esta función requiere integración con APIs externas.' });
+    }
+
+    // 7. Solo Admin
+    if (text === '.soloadmin on'){
+      await sock.sendMessage(from, { text: 'Solo los administradores pueden enviar mensajes.' });
+    }
+
+    // 8. Kick
+    if (text.startsWith('.kick ')){
+      const num = text.split(' ')[1];
+      // Necesitas permisos de admin
+      await sock.groupParticipantsUpdate(from, [`${num}@s.whatsapp.net`], 'remove');
+      await sock.sendMessage(from, { text: 'Miembro expulsado.' });
+    }
+
+    // 9. Antilink
+    if (text === '.antilink on'){
+      await sock.sendMessage(from, { text: 'Modo antilink activado.' });
+    }
+
+    // 10. Grupo cerrado/abierto
+    if (text === '.grupo off'){
+      await sock.groupSettingUpdate(from, 'announcement');
+      await sock.sendMessage(from, { text: 'Grupo cerrado.' });
+    }
+    if (text === '.grupo on'){
+      await sock.groupSettingUpdate(from, 'not_announcement');
+      await sock.sendMessage(from, { text: 'Grupo abierto.' });
+    }
+  });
+}
+
+startBot();
